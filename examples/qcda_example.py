@@ -7,7 +7,7 @@
 """
 
 import torch
-from transformers import (
+from transformers.models.qcda import (
     QCDAConfig, 
     QCDAModel, 
     QCDAForSequenceClassification
