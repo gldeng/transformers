@@ -45,7 +45,7 @@ def plot_attention_weights(weights, title="量子-经典动态注意力权重"):
 def plot_quantum_amplitude(amplitude, title="量子振幅分布"):
     """绘制量子振幅分布"""
     plt.figure(figsize=(12, 6))
-    plt.plot(amplitude.numpy())
+    plt.plot(amplitude.detach().numpy())
     plt.title(title)
     plt.xlabel("量子状态索引")
     plt.ylabel("振幅")
@@ -58,8 +58,8 @@ def plot_quantum_amplitude(amplitude, title="量子振幅分布"):
 def plot_entropy_knowledge_regulation(entropy_values, knowledge_values, title="熵与知识调节"):
     """绘制熵与知识调节过程"""
     plt.figure(figsize=(12, 6))
-    plt.plot(entropy_values.numpy(), label="信息熵")
-    plt.plot(knowledge_values.numpy(), label="知识效用")
+    plt.plot(entropy_values.detach().numpy(), label="信息熵")
+    plt.plot(knowledge_values.detach().numpy(), label="知识效用")
     plt.title(title)
     plt.xlabel("迭代次数")
     plt.ylabel("数值")
@@ -77,9 +77,9 @@ def visualize_interface_domain(quantum_weights, classical_weights, interface_wei
     width = 0.25
     
     plt.figure(figsize=(14, 7))
-    plt.bar(x - width, quantum_weights.numpy(), width, label="量子域权重")
-    plt.bar(x, classical_weights.numpy(), width, label="经典域权重")
-    plt.bar(x + width, interface_weights.numpy(), width, label="界面域权重")
+    plt.bar(x - width, quantum_weights.detach().numpy(), width, label="量子域权重")
+    plt.bar(x, classical_weights.detach().numpy(), width, label="经典域权重")
+    plt.bar(x + width, interface_weights.detach().numpy(), width, label="界面域权重")
     
     plt.title(title)
     plt.xlabel("特征维度")
