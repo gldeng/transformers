@@ -359,7 +359,7 @@ class InterfaceDomainOptimizer(nn.Module):
         
         # 加入熵正则化项
         entropy_regularization = self.lambda_factor * q_entropy.unsqueeze(-1)
-        optimized_interface = hidden_interface * interface_weights + entropy_regularization.unsqueeze(-1)
+        optimized_interface = hidden_interface * interface_weights + entropy_regularization
         
         # 输出转换
         output_states = self.output_projection(optimized_interface)
