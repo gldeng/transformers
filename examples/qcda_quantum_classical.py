@@ -12,9 +12,51 @@ import matplotlib.pyplot as plt
 import numpy as np
 import sys
 import os
+import matplotlib.font_manager as fm
+import platform
 
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+# 根据不同操作系统设置中文字体
+system = platform.system()
+if system == 'Windows':
+    plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'Arial Unicode MS']
+elif system == 'Darwin':  # macOS
+    # macOS的中文字体路径
+    fonts = ['/System/Library/Fonts/PingFang.ttc',
+             '/System/Library/Fonts/STHeiti Light.ttc',
+             '/System/Library/Fonts/STHeiti Medium.ttc',
+             '/Library/Fonts/Arial Unicode.ttf']
+    
+    # 检查哪些字体可用
+    chinese_font = None
+    for font in fonts:
+        if os.path.exists(font):
+            chinese_font = font
+            break
+    
+    if chinese_font:
+        # 添加字体并使用
+        font_prop = fm.FontProperties(fname=chinese_font)
+        plt.rcParams['font.family'] = font_prop.get_name()
+    else:
+        # 尝试使用系统已知的字体名称
+        plt.rcParams['font.sans-serif'] = ['PingFang SC', 'STHeiti', 'Heiti TC', 'Arial Unicode MS']
+else:  # Linux
+    plt.rcParams['font.sans-serif'] = ['WenQuanYi Zen Hei', 'WenQuanYi Micro Hei', 'AR PL UMing CN']
+
+plt.rcParams['axes.unicode_minus'] = False  # 正确显示负号
+
+# 定义一个函数来设置绘图字体
+def set_plot_text_font(ax, font_prop=None):
+    """设置图表中所有文本的字体"""
+    for text in ([ax.title, ax.xaxis.label, ax.yaxis.label] +
+                 ax.get_xticklabels() + ax.get_yticklabels()):
+        if font_prop:
+            text.set_fontproperties(font_prop)
+        elif system == 'Darwin' and chinese_font:  # macOS上使用找到的中文字体
+            text.set_fontproperties(fm.FontProperties(fname=chinese_font))
 
 try:
     from src.transformers.models.qcda.configuration_qcda import QCDAConfig
