@@ -352,6 +352,7 @@ CONFIG_MAPPING_NAMES = OrderedDict(
         ("zamba", "ZambaConfig"),
         ("zamba2", "Zamba2Config"),
         ("zoedepth", "ZoeDepthConfig"),
+        ("quantum_classical", "QuantumClassicalConfig"),
     ]
 )
 

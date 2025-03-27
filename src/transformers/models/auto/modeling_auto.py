@@ -226,6 +226,7 @@ MODEL_MAPPING_NAMES = OrderedDict(
         ("prophetnet", "ProphetNetModel"),
         ("pvt", "PvtModel"),
         ("pvt_v2", "PvtV2Model"),
+        ("quantum_classical", "QuantumClassicalModel"),
         ("qdqbert", "QDQBertModel"),
         ("qwen2", "Qwen2Model"),
         ("qwen2_5_vl", "Qwen2_5_VLModel"),
