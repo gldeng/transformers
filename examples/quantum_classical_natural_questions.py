@@ -37,36 +37,36 @@ class NaturalQuestionsDataset(Dataset):
         print("Preparing Natural Questions dataset...")
         for example in tqdm(dataset, desc="Processing examples"):
             # Extract question
-            question = example.get("question", "")
+            question = example.get("question", {}).get("text", "")
             
             # Extract document/context
-            # Natural Questions provides the full HTML, we'll extract the text
+            # In the default config, the document structure is different
             document = self._extract_text_from_html(example.get("document", {}).get("html", ""))
             
             # Limit document length for processing speed
             document = document[:10000]  # Truncate very long documents
             
-            # Get annotations - NQ has both long and short answers
+            # Get annotations
             has_answer = False
             start_position = 0
             end_position = 0
             
-            if "annotations" in example and len(example["annotations"]) > 0:
-                # Use the first annotation
-                annotation = example["annotations"][0]
-                
-                # Check if there's a short answer
-                if "short_answers" in annotation and len(annotation["short_answers"]) > 0:
-                    has_answer = True
-                    # Use the first short answer
-                    short_answer = annotation["short_answers"][0]
-                    start_position = short_answer.get("start_token", 0)
-                    end_position = short_answer.get("end_token", 0)
-                # If no short answer, check for long answer
-                elif "long_answer" in annotation and annotation["long_answer"].get("start_token", -1) >= 0:
-                    has_answer = True
-                    start_position = annotation["long_answer"].get("start_token", 0)
-                    end_position = annotation["long_answer"].get("end_token", 0)
+            # In the default config, annotations is a dictionary not a list
+            annotations = example.get("annotations", {})
+            
+            # Check for short answers
+            short_answers = annotations.get("short_answers", [])
+            if len(short_answers) > 0:
+                has_answer = True
+                # Use the first short answer
+                short_answer = short_answers[0]
+                start_position = short_answer.get("start_token", 0)
+                end_position = short_answer.get("end_token", 0)
+            # If no short answer, check for long answer
+            elif "long_answer" in annotations and annotations["long_answer"].get("start_token", -1) >= 0:
+                has_answer = True
+                start_position = annotations["long_answer"].get("start_token", 0)
+                end_position = annotations["long_answer"].get("end_token", 0)
             
             # Skip examples without answers
             if not has_answer:
@@ -85,7 +85,6 @@ class NaturalQuestionsDataset(Dataset):
                     return_overflowing_tokens=True
                 )
                 
-                # Convert token positions to character positions and then to token positions in our tokenization
                 # For simplicity, we'll just use approximate positions
                 if has_answer:
                     # Ensure positions are within bounds
@@ -102,16 +101,10 @@ class NaturalQuestionsDataset(Dataset):
                         attention_mask = encoding["attention_mask"][i]
                         token_type_ids = encoding["token_type_ids"][i] if "token_type_ids" in encoding else None
                         
-                        # Default positions
-                        start_pos = 0
-                        end_pos = 0
-                        
-                        # Adjust positions for chunked examples
-                        if has_answer:
-                            # For simplicity, we'll just put the answer at the beginning
-                            # In a real implementation, you'd need to properly map the positions
-                            start_pos = min(50, len(input_ids) - 2)
-                            end_pos = min(60, len(input_ids) - 1)
+                        # For simplicity, we'll just put the answer at a fixed position
+                        # In a real implementation, you'd map the character positions
+                        start_pos = min(50, len(input_ids) - 2)
+                        end_pos = min(60, len(input_ids) - 1)
                         
                         self.examples.append({
                             "input_ids": input_ids,
