@@ -1,7 +1,7 @@
 import torch
 import math
 from transformers import PreTrainedModel
-from .config import QuantumClassicalConfig
+from .configuration_quantum_classical import QuantumClassicalConfig
 
 class BertEmbeddings(torch.nn.Module):
     """Embeddings for BERT-like models"""

@@ -17,13 +17,15 @@ from tqdm import tqdm
 import math
 import re
 
-from transformers.models.quantum_classical import (
+# Add parent directory to the path so we can import local modules
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+# Import from the standalone implementation
+from examples.standalone_quantum_classical_qa import (
     BertTokenizerStandalone,
     QuantumClassicalConfig,
-    QuantumClassicalModel,
     QuantumClassicalForQuestionAnswering
 )
-
 
 class NaturalQuestionsDataset(Dataset):
     """Dataset for Natural Questions"""
@@ -174,7 +176,8 @@ def main():
         
         # Load Natural Questions dataset
         print("Loading Natural Questions dataset...")
-        # Using the smaller 'simplified' version for faster processing
+        # Using the simplified version for faster processing
+        print("Downloading Natural Questions dataset, this may take a while...")
         dataset = load_dataset("natural_questions", "simplified", split="train[:100]")
         print(f"Loaded Natural Questions dataset with {len(dataset)} examples")
         

@@ -45,4 +45,13 @@ class QuantumClassicalConfig(PretrainedConfig):
         self.interface_dim = interface_dim
         self.gram_gamma = gram_gamma
         self.num_recursive_steps = num_recursive_steps
-        self.gram_heads = gram_heads 
+        self.gram_heads = gram_heads
+
+    @classmethod
+    def from_pretrained(cls, pretrained_model_name_or_path, **kwargs):
+        return super().from_pretrained(pretrained_model_name_or_path, **kwargs)
+
+    def to_dict(self):
+        output = super().to_dict()
+        output["model_type"] = self.model_type
+        return output 
