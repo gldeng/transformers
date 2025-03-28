@@ -367,56 +367,74 @@ def evaluate_saved_model(model_path, dataset_path=None, num_examples=10):
     
     return results
 
-def run_performance_analysis():
-    """Analyze how different parameters affect model performance"""
+def run_benchmark_with_randomized_answers():
+    """Run the improved benchmark with adjusted settings"""
     print("=" * 50)
-    print("Performance Analysis of Quantum Classical Model")
+    print("Quantum Classical Model Analysis")
     print("=" * 50)
     
-    # Benchmark different model variants
-    results = benchmark_quantum_classical_variants()
+    # Run the dataset analysis to understand answer patterns
+    analyze_dataset_answers()
     
-    # Try to plot results
-    try:
-        import matplotlib.pyplot as plt
+    # Run the benchmark with the models
+    print("\nRunning benchmark for model variants...")
+    benchmark_quantum_classical_variants()
+    
+    # Note: The following detailed analyses are more time-consuming
+    # Uncomment these if you need more detailed debugging
+    # check_answer_position_bias()
+    # debug_f1_calculation()
+    # compare_trained_vs_random()
+
+def load_variant_models():
+    """Load different variants of the Quantum Classical model for analysis"""
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # Create configs for different model sizes
+    configs = {
+        "Small": QuantumClassicalConfig(
+            vocab_size=30522,
+            hidden_size=128,
+            num_hidden_layers=2,
+            num_attention_heads=4,
+            intermediate_size=256,
+            gram_gamma=0.5,
+            num_recursive_steps=2,
+            gram_heads=2,
+            max_position_embeddings=384
+        ),
+        "Medium": QuantumClassicalConfig(
+            vocab_size=30522,
+            hidden_size=256,
+            num_hidden_layers=3,
+            num_attention_heads=8,
+            intermediate_size=512,
+            gram_gamma=0.7,
+            num_recursive_steps=3,
+            gram_heads=4,
+            max_position_embeddings=384
+        ),
+        "Large": QuantumClassicalConfig(
+            vocab_size=30522,
+            hidden_size=384,
+            num_hidden_layers=6,
+            num_attention_heads=12,
+            intermediate_size=1024,
+            gram_gamma=0.8,
+            num_recursive_steps=4,
+            gram_heads=6,
+            max_position_embeddings=384
+        )
+    }
+    
+    # Initialize models with random weights
+    models = {}
+    for name, config in configs.items():
+        model = QuantumClassicalForQuestionAnswering(config)
+        model.to(device)
+        models[name] = model
         
-        # Extract data
-        models = list(results.keys())
-        param_counts = [results[m]["parameter_count"]/1000000 for m in models]
-        f1_scores = [results[m]["f1"] for m in models]
-        em_scores = [results[m]["exact_match"] for m in models]
-        inference_times = [results[m]["inference_time"]*1000 for m in models]
-        
-        # Create plots
-        fig, axes = plt.subplots(2, 1, figsize=(10, 12))
-        
-        # Plot 1: Model size vs performance
-        axes[0].plot(param_counts, f1_scores, 'o-', label='F1 Score')
-        axes[0].plot(param_counts, em_scores, 's-', label='Exact Match')
-        axes[0].set_xlabel('Model Size (Million Parameters)')
-        axes[0].set_ylabel('Score')
-        axes[0].set_title('Model Size vs Performance')
-        axes[0].legend()
-        axes[0].grid(True, linestyle='--', alpha=0.7)
-        
-        # Plot 2: Model size vs inference time
-        axes[1].plot(param_counts, inference_times, 'o-', color='red')
-        axes[1].set_xlabel('Model Size (Million Parameters)')
-        axes[1].set_ylabel('Inference Time (ms)')
-        axes[1].set_title('Model Size vs Inference Time')
-        axes[1].grid(True, linestyle='--', alpha=0.7)
-        
-        plt.tight_layout()
-        plt.savefig('performance_analysis.png')
-        print("Performance analysis plots saved to 'performance_analysis.png'")
-        
-    except ImportError:
-        print("Matplotlib not available. Install with: pip install matplotlib")
-        print("Raw performance data:")
-        for model, data in results.items():
-            print(f"\n{model}:")
-            for key, value in data.items():
-                print(f"  - {key}: {value}")
+    return models
 
 def analyze_dataset_answers():
     """Analyze the dataset to understand answer patterns"""
@@ -429,7 +447,13 @@ def analyze_dataset_answers():
     # Check a few examples in detail
     for i, example in enumerate(dataset[:5]):
         print(f"\nExample {i+1}:")
-        question = example.get("question", {}).get("text", "")
+        
+        # Handle question field which could be a string or a dict
+        if isinstance(example.get("question"), dict):
+            question = example.get("question", {}).get("text", "")
+        else:
+            question = example.get("question", "")  # Handle case where it's a string
+            
         print(f"Question: {question}")
         
         # Check annotations
@@ -485,6 +509,9 @@ def check_answer_position_bias():
     """Check if models are biased toward the fixed answer positions"""
     print("\n=== Checking Position Bias in Answer Predictions ===")
     
+    # Define device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
     # Test on different models
     models = load_variant_models()
     dataset = load_dataset("natural_questions", "default", split="validation[:50]")
@@ -502,7 +529,8 @@ def check_answer_position_bias():
         # Collect predictions
         with torch.no_grad():
             for batch in eval_dataloader:
-                batch = {k: v.to(device) for k, v in batch.items() if k != "token_type_ids" or v is not None}
+                batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v 
+                         for k, v in batch.items() if k != "token_type_ids" or v is not None}
                 outputs = model(**batch)
                 
                 # Get predictions
@@ -537,6 +565,9 @@ def debug_f1_calculation():
     """Print detailed analysis of F1 calculation"""
     print("\n=== F1 Score Calculation Analysis ===")
     
+    # Define device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
     # Load your model variants
     models = load_variant_models()
     dataset = load_dataset("natural_questions", "default", split="validation[:20]")  # Use fewer examples
@@ -554,7 +585,8 @@ def debug_f1_calculation():
         
         with torch.no_grad():
             for batch in eval_dataloader:
-                batch = {k: v.to(device) for k, v in batch.items() if k != "token_type_ids" or v is not None}
+                batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v 
+                         for k, v in batch.items() if k != "token_type_ids" or v is not None}
                 outputs = model(**batch)
                 
                 # Get predictions
@@ -584,17 +616,22 @@ def debug_f1_calculation():
                     pred_words = set(pred_text.strip().lower().split())
                     true_words = set(true_text.strip().lower().split())
                     
-                    common_words = pred_words.intersection(true_words)
-                    precision = len(common_words) / len(pred_words) if len(pred_words) > 0 else 0
-                    recall = len(common_words) / len(true_words) if len(true_words) > 0 else 0
-                    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+                    if not pred_words and not true_words:
+                        precision, recall, f1 = 1.0, 1.0, 1.0  # Both empty means perfect match
+                    elif not pred_words or not true_words:
+                        precision, recall, f1 = 0.0, 0.0, 0.0  # One empty means no match
+                    else:
+                        common_words = pred_words.intersection(true_words)
+                        precision = len(common_words) / len(pred_words) if len(pred_words) > 0 else 0
+                        recall = len(common_words) / len(true_words) if len(true_words) > 0 else 0
+                        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
                     
                     all_examples.append({
                         "pred_text": pred_text,
                         "true_text": true_text,
                         "pred_words": pred_words,
                         "true_words": true_words,
-                        "common_words": common_words,
+                        "common_words": pred_words.intersection(true_words) if pred_words and true_words else set(),
                         "precision": precision,
                         "recall": recall,
                         "f1": f1
@@ -698,22 +735,62 @@ def compare_trained_vs_random():
     
     print_table(headers, rows)
 
-def run_benchmark_with_randomized_answers():
-    """Run the improved benchmark with adjusted settings"""
-    # First, run diagnostic functions to understand what's happening
-    analyze_dataset_answers()
-    check_answer_position_bias()
-    debug_f1_calculation()
-    compare_trained_vs_random()
+def run_performance_analysis():
+    """Analyze how different parameters affect model performance"""
+    print("=" * 50)
+    print("Performance Analysis of Quantum Classical Model")
+    print("=" * 50)
     
-    # Now run the improved benchmark with adjusted settings
-    benchmark_quantum_classical_variants()
+    # Benchmark different model variants
+    results = benchmark_quantum_classical_variants()
+    
+    # Try to plot results
+    try:
+        import matplotlib.pyplot as plt
+        
+        # Extract data
+        models = list(results.keys())
+        param_counts = [results[m]["parameter_count"]/1000000 for m in models]
+        f1_scores = [results[m]["f1"] for m in models]
+        em_scores = [results[m]["exact_match"] for m in models]
+        inference_times = [results[m]["inference_time"]*1000 for m in models]
+        
+        # Create plots
+        fig, axes = plt.subplots(2, 1, figsize=(10, 12))
+        
+        # Plot 1: Model size vs performance
+        axes[0].plot(param_counts, f1_scores, 'o-', label='F1 Score')
+        axes[0].plot(param_counts, em_scores, 's-', label='Exact Match')
+        axes[0].set_xlabel('Model Size (Million Parameters)')
+        axes[0].set_ylabel('Score')
+        axes[0].set_title('Model Size vs Performance')
+        axes[0].legend()
+        axes[0].grid(True, linestyle='--', alpha=0.7)
+        
+        # Plot 2: Model size vs inference time
+        axes[1].plot(param_counts, inference_times, 'o-', color='red')
+        axes[1].set_xlabel('Model Size (Million Parameters)')
+        axes[1].set_ylabel('Inference Time (ms)')
+        axes[1].set_title('Model Size vs Inference Time')
+        axes[1].grid(True, linestyle='--', alpha=0.7)
+        
+        plt.tight_layout()
+        plt.savefig('performance_analysis.png')
+        print("Performance analysis plots saved to 'performance_analysis.png'")
+        
+    except ImportError:
+        print("Matplotlib not available. Install with: pip install matplotlib")
+        print("Raw performance data:")
+        for model, data in results.items():
+            print(f"\n{model}:")
+            for key, value in data.items():
+                print(f"  - {key}: {value}")
 
 if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description="Evaluate or analyze Quantum Classical model")
-    parser.add_argument("--mode", type=str, choices=["evaluate", "analyze"], 
+    parser.add_argument("--mode", type=str, choices=["evaluate", "analyze", "performance", "debug"], 
                         default="analyze", help="Operation mode")
     parser.add_argument("--model_path", type=str, default="quantum_classical_natural_questions.pt",
                         help="Path to saved model")
@@ -728,3 +805,11 @@ if __name__ == "__main__":
         evaluate_saved_model(args.model_path, args.dataset_path, num_examples=args.num_examples)
     elif args.mode == "analyze":
         run_benchmark_with_randomized_answers()
+    elif args.mode == "performance":
+        run_performance_analysis()
+    elif args.mode == "debug":
+        # Full debugging mode with all analyses
+        analyze_dataset_answers()
+        check_answer_position_bias()
+        debug_f1_calculation()
+        compare_trained_vs_random()
