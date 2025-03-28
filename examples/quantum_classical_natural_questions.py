@@ -17,8 +17,7 @@ from tqdm import tqdm
 import math
 import re
 
-# Import the model from the original file to avoid duplication
-from examples.standalone_quantum_classical_qa import (
+from transformers.models.quantum_classical import (
     BertTokenizerStandalone,
     QuantumClassicalConfig,
     QuantumClassicalModel,
