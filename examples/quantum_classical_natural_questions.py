@@ -176,9 +176,9 @@ def main():
         
         # Load Natural Questions dataset
         print("Loading Natural Questions dataset...")
-        # Using the simplified version for faster processing
+        # Using the default version instead of simplified
         print("Downloading Natural Questions dataset, this may take a while...")
-        dataset = load_dataset("natural_questions", "simplified", split="train[:100]")
+        dataset = load_dataset("natural_questions", "default", split="train[:100]")
         print(f"Loaded Natural Questions dataset with {len(dataset)} examples")
         
         # Prepare dataset
