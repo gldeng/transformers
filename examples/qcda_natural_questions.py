@@ -135,69 +135,117 @@ def load_natural_questions_dataset(subset_size=5000):
     """加载Natural Questions数据集，并取部分用于快速实验"""
     print("加载Natural Questions数据集...")
     
-    # 加载数据集 (仅有效问答对)
-    dataset = load_dataset("natural_questions", split="train")
+    try:
+        # 尝试直接加载数据集
+        dataset = load_dataset("natural_questions", split="train")
+    except Exception as e:
+        print(f"加载完整数据集失败: {e}")
+        print("尝试加载简化版本...")
+        # 加载验证集，通常更小更易处理
+        try:
+            dataset = load_dataset("natural_questions", split="validation")
+        except:
+            # 如果仍然失败，尝试加载squad数据集作为替代
+            print("尝试改用SQuAD数据集...")
+            dataset = load_dataset("squad", split="train")
+    
+    # 打印数据集信息
+    print(f"数据集特征: {dataset.features}")
+    print(f"原始数据集大小: {len(dataset)}个样本")
     
     # 为了快速实验，我们只取部分数据
     if subset_size and subset_size < len(dataset):
         dataset = dataset.select(range(subset_size))
     
-    print(f"数据集大小: {len(dataset)}个样本")
+    print(f"使用数据集大小: {len(dataset)}个样本")
+    
+    # 显示一个样本示例
+    print("\n数据集样本示例:")
+    sample = dataset[0]
+    for key, value in sample.items():
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            print(f"{key}: {value}")
+        else:
+            print(f"{key}: {type(value)}")
+    
     return dataset
 
 
 def prepare_nq_features(examples, tokenizer, max_length=384, doc_stride=128, max_query_length=64):
     """处理Natural Questions数据集的样本，准备模型输入特征"""
-    # 提取问题和上下文
-    questions = [q.strip() for q in examples["question"]["text"]]
+    # 检查数据结构并打印示例
+    print("Dataset structure sample:")
+    for key in examples:
+        print(f"Key: {key}, Type: {type(examples[key])}")
+        if isinstance(examples[key], dict):
+            print(f"  Subkeys: {examples[key].keys()}")
+    
+    # 正确提取问题 - Natural Questions格式
+    questions = []
+    for q in examples["question"]:
+        if isinstance(q, dict) and "text" in q:
+            questions.append(q["text"].strip())
+        elif isinstance(q, str):
+            questions.append(q.strip())
+        else:
+            # 如果问题不符合预期格式，使用空字符串
+            questions.append("")
+    
     contexts = []
     answers = {"text": [], "answer_start": []}
     
-    for annotations in examples["annotations"]:
-        # 从第一个长答案中提取上下文
-        if annotations["long_answer"] and "start_token" in annotations["long_answer"]:
-            start_token = annotations["long_answer"]["start_token"]
-            end_token = annotations["long_answer"]["end_token"]
-            document_tokens = examples["document"]["tokens"]
-            document_text = document_tokens["token"]
-            
-            # 提取长答案作为上下文
-            context = " ".join(document_text[start_token:end_token])
-            contexts.append(context)
-            
-            # 获取短答案
-            short_answers_text = []
-            short_answers_start = []
-            
-            if annotations["short_answers"]:
-                for short_answer in annotations["short_answers"]:
-                    sa_start = short_answer["start_token"] - start_token
-                    sa_end = short_answer["end_token"] - start_token
-                    if sa_start >= 0 and sa_end <= len(context):
-                        answer_text = " ".join(document_text[short_answer["start_token"]:short_answer["end_token"]])
-                        short_answers_text.append(answer_text)
-                        # 计算字符级别的起始位置
-                        char_start = len(" ".join(document_text[start_token:short_answer["start_token"]]))
-                        if char_start > 0:  # 添加额外的空格
-                            char_start += 1
-                        short_answers_start.append(char_start)
-            
-            # 如果没有短答案，使用长答案开头
-            if not short_answers_text:
-                short_answers_text = [""]
-                short_answers_start = [0]
-                
-            answers["text"].append(short_answers_text)
-            answers["answer_start"].append(short_answers_start)
+    # 遍历每个样本处理上下文和答案
+    for idx in range(len(questions)):
+        # 获取文档内容
+        if "document" in examples and idx < len(examples["document"]):
+            doc = examples["document"][idx]
+            # 尝试提取文档内容
+            if isinstance(doc, dict) and "tokens" in doc and "token" in doc["tokens"]:
+                # 使用前500个标记作为上下文
+                doc_tokens = doc["tokens"]["token"][:500]
+                context = " ".join(doc_tokens)
+            else:
+                context = ""
         else:
-            # 如果没有长答案，使用文档的前N个标记
-            document_tokens = examples["document"]["tokens"]
-            document_text = document_tokens["token"]
-            context = " ".join(document_text[:500])  # 使用前500个标记
-            contexts.append(context)
-            answers["text"].append([""])
-            answers["answer_start"].append([0])
-    
+            context = ""
+        
+        contexts.append(context)
+        
+        # 处理答案
+        answer_texts = []
+        answer_starts = []
+        
+        if "annotations" in examples and idx < len(examples["annotations"]):
+            annotation = examples["annotations"][idx]
+            
+            # 尝试从短答案中提取
+            if isinstance(annotation, dict) and "short_answers" in annotation and annotation["short_answers"]:
+                for short_ans in annotation["short_answers"]:
+                    if "start_token" in short_ans and "end_token" in short_ans:
+                        # 如果有文档和标记，提取答案文本
+                        if "document" in examples and idx < len(examples["document"]):
+                            doc = examples["document"][idx]
+                            if isinstance(doc, dict) and "tokens" in doc and "token" in doc["tokens"]:
+                                start_token = short_ans["start_token"]
+                                end_token = short_ans["end_token"]
+                                answer_text = " ".join(doc["tokens"]["token"][start_token:end_token])
+                                # 计算在上下文中的字符位置
+                                char_start = 0
+                                if start_token < 500:  # 只有当答案在我们使用的上下文中时
+                                    char_start = len(" ".join(doc["tokens"]["token"][:start_token]))
+                                    if char_start > 0:
+                                        char_start += 1  # 为空格添加
+                                    answer_texts.append(answer_text)
+                                    answer_starts.append(char_start)
+        
+        # 如果没有找到答案
+        if not answer_texts:
+            answer_texts = [""]
+            answer_starts = [0]
+            
+        answers["text"].append(answer_texts)
+        answers["answer_start"].append(answer_starts)
+            
     # 对问题和上下文进行tokenize
     tokenized_examples = tokenizer(
         questions,
@@ -607,41 +655,50 @@ def main():
     
     # 设置设备
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"使用设备: {device}")
     
-    # 加载BERT tokenizer
-    tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
-    
-    # 加载Natural Questions数据集（使用较小的子集用于快速实验）
-    dataset = load_natural_questions_dataset(subset_size=1000)
-    
-    # 准备数据集
-    train_features, eval_features, eval_dataset = prepare_natural_questions_dataset(dataset, tokenizer)
-    
-    # 创建数据加载器
-    train_dataloader, eval_dataloader = create_dataloaders(train_features, eval_features)
-    
-    # 初始化问答模型
-    model = initialize_qa_model()
-    print(f"模型参数数量: {sum(p.numel() for p in model.parameters()):,}")
-    
-    # 训练模型
-    model, best_f1 = train_qa_model(
-        model,
-        train_dataloader,
-        eval_dataloader,
-        tokenizer,
-        eval_dataset,
-        dataset,
-        device,
-        num_epochs=3
-    )
-    
-    # 加载最佳模型权重
-    print("加载最佳模型...")
-    model.load_state_dict(torch.load("qcda_nq_best.pt"))
-    
-    # 打印结果
-    print(f"训练完成! 最佳F1分数: {best_f1:.4f}")
+    try:
+        # 加载BERT tokenizer
+        tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+        
+        # 加载Natural Questions数据集（使用较小的子集用于快速实验）
+        dataset = load_natural_questions_dataset(subset_size=100)  # 使用非常小的子集进行测试
+        
+        # 准备数据集
+        try:
+            train_features, eval_features, eval_dataset = prepare_natural_questions_dataset(dataset, tokenizer)
+            
+            # 创建数据加载器
+            train_dataloader, eval_dataloader = create_dataloaders(train_features, eval_features)
+            
+            # 初始化问答模型
+            model = initialize_qa_model()
+            print(f"模型参数数量: {sum(p.numel() for p in model.parameters()):,}")
+            
+            # 训练模型
+            model, best_f1 = train_qa_model(
+                model,
+                train_dataloader,
+                eval_dataloader,
+                tokenizer,
+                eval_dataset,
+                dataset,
+                device,
+                num_epochs=2  # 减少训练轮次
+            )
+            
+            # 打印结果
+            print(f"训练完成! 最佳F1分数: {best_f1:.4f}")
+            
+        except Exception as e:
+            print(f"数据处理或训练过程中出错: {e}")
+            import traceback
+            traceback.print_exc()
+            
+    except Exception as e:
+        print(f"初始化过程中出错: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 if __name__ == "__main__":
