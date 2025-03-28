@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Simplified benchmarking for Quantum Classical model
+Improved benchmarking for Quantum Classical models
 """
 
 import os
@@ -11,7 +11,7 @@ import time
 import torch
 import numpy as np
 from datasets import load_dataset
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 # Add parent directory to the path so we can import local modules
@@ -418,6 +418,297 @@ def run_performance_analysis():
             for key, value in data.items():
                 print(f"  - {key}: {value}")
 
+def analyze_dataset_answers():
+    """Analyze the dataset to understand answer patterns"""
+    print("\n=== Dataset Answer Analysis ===")
+    
+    # Load dataset
+    dataset = load_dataset("natural_questions", "default", split="train[:100]")
+    tokenizer = BertTokenizerStandalone()
+    
+    # Check a few examples in detail
+    for i, example in enumerate(dataset[:5]):
+        print(f"\nExample {i+1}:")
+        question = example.get("question", {}).get("text", "")
+        print(f"Question: {question}")
+        
+        # Check annotations
+        annotations = example.get("annotations", {})
+        short_answers = annotations.get("short_answers", [])
+        if short_answers:
+            print(f"Has {len(short_answers)} short answers")
+            for j, ans in enumerate(short_answers[:2]):  # Show first 2 answers
+                print(f"  Answer {j+1}: Start={ans.get('start_token')}, End={ans.get('end_token')}")
+        else:
+            print("No short answers")
+            
+        # Check long answer
+        if "long_answer" in annotations:
+            long_ans = annotations["long_answer"]
+            if long_ans.get("start_token", -1) >= 0:
+                print(f"Long answer: Start={long_ans.get('start_token')}, End={long_ans.get('end_token')}")
+            else:
+                print("No long answer")
+    
+    # Check fixed position bias in the processed dataset
+    qa_dataset = NaturalQuestionsDataset(dataset, tokenizer, max_length=384)
+    
+    start_positions = []
+    end_positions = []
+    
+    # Collect ground truth positions
+    for example in qa_dataset.examples:
+        start_positions.append(example["start_positions"].item())
+        end_positions.append(example["end_positions"].item())
+    
+    # Analyze position distributions
+    print(f"\nProcessed dataset size: {len(qa_dataset)}")
+    print(f"Ground truth start position distribution:")
+    start_counts = {}
+    for pos in start_positions:
+        start_counts[pos] = start_counts.get(pos, 0) + 1
+        
+    # Sort by most common positions
+    for pos, count in sorted(start_counts.items(), key=lambda x: -x[1])[:5]:
+        print(f"  Position {pos}: {count} answers ({count/len(start_positions)*100:.1f}%)")
+        
+    print(f"Ground truth end position distribution:")
+    end_counts = {}
+    for pos in end_positions:
+        end_counts[pos] = end_counts.get(pos, 0) + 1
+        
+    # Sort by most common positions
+    for pos, count in sorted(end_counts.items(), key=lambda x: -x[1])[:5]:
+        print(f"  Position {pos}: {count} answers ({count/len(end_positions)*100:.1f}%)")
+
+def check_answer_position_bias():
+    """Check if models are biased toward the fixed answer positions"""
+    print("\n=== Checking Position Bias in Answer Predictions ===")
+    
+    # Test on different models
+    models = load_variant_models()
+    dataset = load_dataset("natural_questions", "default", split="validation[:50]")
+    tokenizer = BertTokenizerStandalone()
+    eval_dataset = NaturalQuestionsDataset(dataset, tokenizer, max_length=384)
+    eval_dataloader = DataLoader(eval_dataset, batch_size=4)
+    
+    for name, model in models.items():
+        print(f"\n--- Model: {name} ---")
+        model.eval()
+        
+        start_positions = []
+        end_positions = []
+        
+        # Collect predictions
+        with torch.no_grad():
+            for batch in eval_dataloader:
+                batch = {k: v.to(device) for k, v in batch.items() if k != "token_type_ids" or v is not None}
+                outputs = model(**batch)
+                
+                # Get predictions
+                start_pred = torch.argmax(outputs["start_logits"], dim=1)
+                end_pred = torch.argmax(outputs["end_logits"], dim=1)
+                
+                # Store positions
+                start_positions.extend(start_pred.cpu().tolist())
+                end_positions.extend(end_pred.cpu().tolist())
+        
+        # Analyze position distributions
+        print(f"Number of examples: {len(start_positions)}")
+        print(f"Start position distribution:")
+        start_counts = {}
+        for pos in start_positions:
+            start_counts[pos] = start_counts.get(pos, 0) + 1
+            
+        # Sort by most common positions
+        for pos, count in sorted(start_counts.items(), key=lambda x: -x[1])[:5]:
+            print(f"  Position {pos}: {count} predictions ({count/len(start_positions)*100:.1f}%)")
+            
+        print(f"End position distribution:")
+        end_counts = {}
+        for pos in end_positions:
+            end_counts[pos] = end_counts.get(pos, 0) + 1
+            
+        # Sort by most common positions
+        for pos, count in sorted(end_counts.items(), key=lambda x: -x[1])[:5]:
+            print(f"  Position {pos}: {count} predictions ({count/len(end_positions)*100:.1f}%)")
+
+def debug_f1_calculation():
+    """Print detailed analysis of F1 calculation"""
+    print("\n=== F1 Score Calculation Analysis ===")
+    
+    # Load your model variants
+    models = load_variant_models()
+    dataset = load_dataset("natural_questions", "default", split="validation[:20]")  # Use fewer examples
+    tokenizer = BertTokenizerStandalone()
+    eval_dataset = NaturalQuestionsDataset(dataset, tokenizer, max_length=384)
+    eval_dataloader = DataLoader(eval_dataset, batch_size=2)
+    
+    # Check predictions for each model
+    for name, model in models.items():
+        print(f"\n--- Model: {name} ---")
+        model.eval()
+        
+        # Collect all predictions and labels
+        all_examples = []
+        
+        with torch.no_grad():
+            for batch in eval_dataloader:
+                batch = {k: v.to(device) for k, v in batch.items() if k != "token_type_ids" or v is not None}
+                outputs = model(**batch)
+                
+                # Get predictions
+                start_pred = torch.argmax(outputs["start_logits"], dim=1)
+                end_pred = torch.argmax(outputs["end_logits"], dim=1)
+                
+                for i in range(len(batch["input_ids"])):
+                    # Extract tokens for both predicted and true answers
+                    pred_start = start_pred[i].item()
+                    pred_end = end_pred[i].item()
+                    true_start = batch["start_positions"][i].item()
+                    true_end = batch["end_positions"][i].item()
+                    
+                    if pred_end < pred_start:
+                        pred_end = pred_start
+                        
+                    # Get the tokens
+                    input_ids = batch["input_ids"][i]
+                    pred_tokens = input_ids[pred_start:pred_end+1]
+                    true_tokens = input_ids[true_start:true_end+1]
+                    
+                    # Decode
+                    pred_text = decode_tokens(tokenizer, pred_tokens)
+                    true_text = decode_tokens(tokenizer, true_tokens)
+                    
+                    # Calculate F1 for this example
+                    pred_words = set(pred_text.strip().lower().split())
+                    true_words = set(true_text.strip().lower().split())
+                    
+                    common_words = pred_words.intersection(true_words)
+                    precision = len(common_words) / len(pred_words) if len(pred_words) > 0 else 0
+                    recall = len(common_words) / len(true_words) if len(true_words) > 0 else 0
+                    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+                    
+                    all_examples.append({
+                        "pred_text": pred_text,
+                        "true_text": true_text,
+                        "pred_words": pred_words,
+                        "true_words": true_words,
+                        "common_words": common_words,
+                        "precision": precision,
+                        "recall": recall,
+                        "f1": f1
+                    })
+        
+        # Detailed analysis of the F1 scores
+        print(f"Number of examples: {len(all_examples)}")
+        avg_f1 = sum(ex["f1"] for ex in all_examples) / len(all_examples)
+        print(f"Average F1 score: {avg_f1:.4f}")
+        
+        # Show distribution of F1 scores
+        f1_bins = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
+        distribution = [0] * (len(f1_bins) - 1)
+        for ex in all_examples:
+            for i in range(len(f1_bins) - 1):
+                if f1_bins[i] <= ex["f1"] < f1_bins[i+1]:
+                    distribution[i] += 1
+                elif i == len(f1_bins) - 2 and ex["f1"] == f1_bins[i+1]:  # For F1=1.0
+                    distribution[i] += 1
+                    
+        print("F1 score distribution:")
+        for i in range(len(f1_bins) - 1):
+            print(f"  {f1_bins[i]:.1f}-{f1_bins[i+1]:.1f}: {distribution[i]} examples ({distribution[i]/len(all_examples)*100:.1f}%)")
+            
+        # Print some example predictions 
+        print("\nSample predictions:")
+        for i, ex in enumerate(all_examples[:5]):
+            print(f"\nExample {i+1}:")
+            print(f"  True: '{ex['true_text']}'")
+            print(f"  Pred: '{ex['pred_text']}'")
+            print(f"  Common words: {ex['common_words']}")
+            print(f"  Precision={ex['precision']:.2f}, Recall={ex['recall']:.2f}, F1={ex['f1']:.2f}")
+
+def compare_trained_vs_random():
+    """Compare trained model vs. random initialization"""
+    print("\n=== Comparing Trained vs Random Models ===")
+    
+    # Setup
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    dataset = load_dataset("natural_questions", "default", split="validation[:50]")
+    tokenizer = BertTokenizerStandalone()
+    eval_dataset = NaturalQuestionsDataset(dataset, tokenizer, max_length=384)
+    eval_dataloader = DataLoader(eval_dataset, batch_size=4)
+    
+    # Define configs
+    configs = {
+        "Small": {"hidden_size": 128, "layers": 2},
+        "Medium": {"hidden_size": 256, "layers": 3},
+        "Large": {"hidden_size": 384, "layers": 6}
+    }
+    
+    # Test both random and pretrained weights
+    results = {}
+    
+    for size, params in configs.items():
+        print(f"\n--- Testing {size} model ---")
+        
+        # Create config
+        config = QuantumClassicalConfig(
+            vocab_size=30522,
+            hidden_size=params["hidden_size"],
+            num_hidden_layers=params["layers"],
+            num_attention_heads=params["hidden_size"] // 32,
+            intermediate_size=params["hidden_size"] * 2,
+            max_position_embeddings=384
+        )
+        
+        # Random weights
+        random_model = QuantumClassicalForQuestionAnswering(config)
+        random_model.to(device)
+        print("Evaluating with random weights...")
+        random_results = evaluate_model(random_model, eval_dataloader, device, tokenizer)
+        
+        # Try to load trained weights if available
+        model_path = f"quantum_classical_{size.lower()}.pt"
+        try:
+            trained_model = QuantumClassicalForQuestionAnswering(config)
+            trained_model.load_state_dict(torch.load(model_path))
+            trained_model.to(device)
+            print(f"Evaluating with trained weights from {model_path}...")
+            trained_results = evaluate_model(trained_model, eval_dataloader, device, tokenizer)
+        except:
+            print(f"No trained weights found at {model_path}")
+            trained_results = {"loss": "N/A", "exact_match": "N/A", "f1": "N/A"}
+        
+        results[f"{size} (Random)"] = random_results
+        results[f"{size} (Trained)"] = trained_results
+    
+    # Print comparison
+    print("\n=== Results Comparison ===")
+    headers = ["Model", "Loss", "Exact Match", "F1"]
+    rows = []
+    
+    for model_name, res in results.items():
+        rows.append([
+            model_name, 
+            f"{res['loss']:.4f}" if isinstance(res['loss'], float) else res['loss'],
+            f"{res['exact_match']:.4f}" if isinstance(res['exact_match'], float) else res['exact_match'],
+            f"{res['f1']:.4f}" if isinstance(res['f1'], float) else res['f1']
+        ])
+    
+    print_table(headers, rows)
+
+def run_benchmark_with_randomized_answers():
+    """Run the improved benchmark with adjusted settings"""
+    # First, run diagnostic functions to understand what's happening
+    analyze_dataset_answers()
+    check_answer_position_bias()
+    debug_f1_calculation()
+    compare_trained_vs_random()
+    
+    # Now run the improved benchmark with adjusted settings
+    benchmark_quantum_classical_variants()
+
 if __name__ == "__main__":
     import argparse
     
@@ -436,4 +727,4 @@ if __name__ == "__main__":
     if args.mode == "evaluate":
         evaluate_saved_model(args.model_path, args.dataset_path, num_examples=args.num_examples)
     elif args.mode == "analyze":
-        run_performance_analysis()
+        run_benchmark_with_randomized_answers()
