@@ -223,9 +223,23 @@ def prepare_nq_features(examples, tokenizer, max_length=384, doc_stride=128, max
                 for short_ans in annotation["short_answers"]:
                     if "start_token" in short_ans and "end_token" in short_ans:
                         try:
-                            # 确保 start_token 和 end_token 是整数
-                            start_token = int(short_ans["start_token"])
-                            end_token = int(short_ans["end_token"])
+                            # Handle case where tokens are lists
+                            if isinstance(short_ans["start_token"], list):
+                                # If empty list, skip this answer
+                                if not short_ans["start_token"]:
+                                    continue
+                                # Otherwise, take the first element
+                                start_token = int(short_ans["start_token"][0])
+                            else:
+                                # Normal case - direct conversion
+                                start_token = int(short_ans["start_token"])
+                            
+                            if isinstance(short_ans["end_token"], list):
+                                if not short_ans["end_token"]:
+                                    continue
+                                end_token = int(short_ans["end_token"][0])
+                            else:
+                                end_token = int(short_ans["end_token"])
                             
                             # 如果有文档和标记，提取答案文本
                             if "document" in examples and idx < len(examples["document"]):
