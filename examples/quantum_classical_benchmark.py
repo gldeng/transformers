@@ -27,6 +27,18 @@ from examples.standalone_quantum_classical_qa import (
 # Import the dataset class
 from examples.quantum_classical_natural_questions import NaturalQuestionsDataset
 
+def decode_tokens(tokenizer, token_ids):
+    """Helper function to decode token IDs to text"""
+    if isinstance(token_ids, torch.Tensor):
+        token_ids = token_ids.tolist()
+        
+    # Convert token IDs to tokens and join them
+    tokens = [tokenizer.ids_to_tokens.get(token_id, "[UNK]") for token_id in token_ids]
+    
+    # Remove special tokens and join with spaces
+    filtered_tokens = [token for token in tokens if token not in ["[PAD]", "[CLS]", "[SEP]"]]
+    return " ".join(filtered_tokens)
+
 def print_table(headers, rows):
     """Print a formatted table of results"""
     # Calculate column widths
@@ -99,9 +111,9 @@ def evaluate_model(model, eval_dataloader, device, tokenizer, num_examples=5):
                 pred_tokens = input_ids[i][pred_start:pred_end+1]
                 true_tokens = input_ids[i][true_start:true_end+1]
                 
-                # Convert to text (simplified for demonstration)
-                pred_text = tokenizer.decode(pred_tokens)
-                true_text = tokenizer.decode(true_tokens)
+                # Convert to text using our helper function instead of tokenizer.decode
+                pred_text = decode_tokens(tokenizer, pred_tokens)
+                true_text = decode_tokens(tokenizer, true_tokens)
                 
                 all_predictions.append(pred_text)
                 all_labels.append(true_text)
@@ -109,12 +121,12 @@ def evaluate_model(model, eval_dataloader, device, tokenizer, num_examples=5):
                 # Store examples to show (only a few)
                 if batch_idx < num_examples and i == 0:
                     # Get the full input sequence
-                    full_text = tokenizer.decode(input_ids[i])
+                    full_text = decode_tokens(tokenizer, input_ids[i])
                     
                     # Extract question and context based on the [SEP] token position
                     sep_pos = input_ids[i].tolist().index(tokenizer.vocab["[SEP]"])
-                    question = tokenizer.decode(input_ids[i][1:sep_pos])  # Skip [CLS]
-                    context = tokenizer.decode(input_ids[i][sep_pos+1:])  # Skip [SEP]
+                    question = decode_tokens(tokenizer, input_ids[i][1:sep_pos])  # Skip [CLS]
+                    context = decode_tokens(tokenizer, input_ids[i][sep_pos+1:])  # Skip [SEP]
                     
                     examples_to_show.append({
                         "question": question.strip(),
