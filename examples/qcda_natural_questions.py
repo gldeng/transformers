@@ -222,21 +222,35 @@ def prepare_nq_features(examples, tokenizer, max_length=384, doc_stride=128, max
             if isinstance(annotation, dict) and "short_answers" in annotation and annotation["short_answers"]:
                 for short_ans in annotation["short_answers"]:
                     if "start_token" in short_ans and "end_token" in short_ans:
-                        # 如果有文档和标记，提取答案文本
-                        if "document" in examples and idx < len(examples["document"]):
-                            doc = examples["document"][idx]
-                            if isinstance(doc, dict) and "tokens" in doc and "token" in doc["tokens"]:
-                                start_token = short_ans["start_token"]
-                                end_token = short_ans["end_token"]
-                                answer_text = " ".join(doc["tokens"]["token"][start_token:end_token])
-                                # 计算在上下文中的字符位置
-                                char_start = 0
-                                if start_token < 500:  # 只有当答案在我们使用的上下文中时
-                                    char_start = len(" ".join(doc["tokens"]["token"][:start_token]))
-                                    if char_start > 0:
-                                        char_start += 1  # 为空格添加
-                                    answer_texts.append(answer_text)
-                                    answer_starts.append(char_start)
+                        try:
+                            # 确保 start_token 和 end_token 是整数
+                            start_token = int(short_ans["start_token"])
+                            end_token = int(short_ans["end_token"])
+                            
+                            # 如果有文档和标记，提取答案文本
+                            if "document" in examples and idx < len(examples["document"]):
+                                doc = examples["document"][idx]
+                                if isinstance(doc, dict) and "tokens" in doc and "token" in doc["tokens"]:
+                                    # 确保不超出范围
+                                    tokens = doc["tokens"]["token"]
+                                    start_token = max(0, min(start_token, len(tokens)-1))
+                                    end_token = max(start_token+1, min(end_token, len(tokens)))
+                                    
+                                    answer_text = " ".join(tokens[start_token:end_token])
+                                    
+                                    # 计算在上下文中的字符位置
+                                    char_start = 0
+                                    if start_token < 500:  # 只有当答案在我们使用的上下文中时
+                                        try:
+                                            char_start = len(" ".join(tokens[:start_token]))
+                                            if char_start > 0:
+                                                char_start += 1  # 为空格添加
+                                            answer_texts.append(answer_text)
+                                            answer_starts.append(char_start)
+                                        except Exception as e:
+                                            print(f"字符位置计算错误: {e}")
+                        except (ValueError, TypeError) as e:
+                            print(f"答案标记索引错误: {e}, start_token={short_ans['start_token']}, end_token={short_ans['end_token']}")
         
         # 如果没有找到答案
         if not answer_texts:
@@ -650,7 +664,7 @@ def text_eval_metric(references, predictions):
 def main():
     """主函数"""
     print("=" * 50)
-    print("使用Google Natural Questions数据集训练和测试QCDA模型")
+    print("使用问答数据集训练和测试QCDA模型")
     print("=" * 50)
     
     # 设置设备
@@ -661,34 +675,70 @@ def main():
         # 加载BERT tokenizer
         tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
         
-        # 加载Natural Questions数据集（使用较小的子集用于快速实验）
-        dataset = load_natural_questions_dataset(subset_size=100)  # 使用非常小的子集进行测试
+        # 尝试加载Natural Questions数据集
+        try:
+            dataset = load_natural_questions_dataset(subset_size=100)
+        except Exception as e:
+            print(f"加载Natural Questions失败: {e}")
+            print("切换到SQuAD数据集...")
+            dataset = load_dataset("squad", split="train[:500]")
+            print(f"加载了SQuAD数据集，样本数: {len(dataset)}")
         
         # 准备数据集
         try:
             train_features, eval_features, eval_dataset = prepare_natural_questions_dataset(dataset, tokenizer)
             
             # 创建数据加载器
-            train_dataloader, eval_dataloader = create_dataloaders(train_features, eval_features)
+            train_dataloader = DataLoader(train_features, batch_size=8, shuffle=True)
+            eval_dataloader = DataLoader(eval_features, batch_size=8)
+            
+            print(f"训练数据加载器大小: {len(train_dataloader)}")
+            print(f"评估数据加载器大小: {len(eval_dataloader)}")
             
             # 初始化问答模型
-            model = initialize_qa_model()
-            print(f"模型参数数量: {sum(p.numel() for p in model.parameters()):,}")
-            
-            # 训练模型
-            model, best_f1 = train_qa_model(
-                model,
-                train_dataloader,
-                eval_dataloader,
-                tokenizer,
-                eval_dataset,
-                dataset,
-                device,
-                num_epochs=2  # 减少训练轮次
+            config = QCDAConfig(
+                vocab_size=30522,  # BERT词表大小
+                hidden_size=256,
+                num_hidden_layers=2,
+                num_attention_heads=8,
+                intermediate_size=512,
+                quantum_dim=16,
+                classical_dim=16,
+                interface_dim=8,
+                max_position_embeddings=512
             )
             
-            # 打印结果
-            print(f"训练完成! 最佳F1分数: {best_f1:.4f}")
+            model = QCDAForQuestionAnswering(config)
+            print(f"模型参数数量: {sum(p.numel() for p in model.parameters()):,}")
+            
+            # 移至设备并设置训练参数
+            model.to(device)
+            optimizer = AdamW(model.parameters(), lr=5e-5)
+            
+            # 简单训练循环
+            print("开始训练...")
+            model.train()
+            for epoch in range(1):  # 只训练一个epoch
+                total_loss = 0
+                for step, batch in enumerate(tqdm(train_dataloader, desc=f"Epoch {epoch+1}")):
+                    batch = {k: v.to(device) for k, v in batch.items()}
+                    outputs = model(**batch)
+                    loss = outputs["loss"]
+                    loss.backward()
+                    optimizer.step()
+                    optimizer.zero_grad()
+                    total_loss += loss.item()
+                    
+                    if step % 50 == 0:
+                        print(f"Batch {step}: loss = {loss.item():.4f}")
+                        
+                    if step >= 100:  # 仅运行100个批次进行测试
+                        break
+                
+                avg_loss = total_loss / (step + 1)
+                print(f"Epoch {epoch+1} 平均损失: {avg_loss:.4f}")
+            
+            print("训练完成!")
             
         except Exception as e:
             print(f"数据处理或训练过程中出错: {e}")
